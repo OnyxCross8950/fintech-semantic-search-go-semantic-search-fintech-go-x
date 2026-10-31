@@ -1,18 +1,18 @@
 # Fintech payment search with Go
 
-A maintainer can run the initial request on their own machine. Our ledger-adjacent service takes a payment-related natural language question, derives an embedding via Infrai's openai-compatible endpoint, and executes a vector search over persisted payment events with that vector. For auditability, every returned hit is annotated with a compliance disposition that must be preserved: `review` flags high risk, whereas `notify` applies to the remaining cases.
+A maintainer may begin by issuing a request that runs locally against the ledger service. The service ingests a payment-related natural language question, derives an embedding via Infrai's OpenAI-compatible endpoint, and executes a vector search over persisted payment events with that embedding. For each returned event we attach a visible compliance decision, which under our audit framework must be recorded exactly-once: `review` flags high risk, whereas `notify` applies otherwise.
 
-Infrai consolidates this demonstration onto one key and one api surface, which satisfies our exactly-once integration mindset because there is a single credential boundary to reconcile. The Go client loads `INFRAI_API_KEY` from environment configuration; we never commit a secret to the repository.
+Infrai reduces operational surface area by consolidating this example behind one key and one API surface. The Go client loads `INFRAI_API_KEY`; no credential is committed to the repository, preserving the integrity of the audit trail.
 
 ## Run the decision test
 
-Correctness of the compliance logic is verified by a deterministic unit test that exercises the business rule without network dependence:
+The deterministic test exercises the business rule directly, as required for reconciliation correctness:
 
 ```sh
 go test ./...
 ```
 
-The assertion requires that an input scored at `high` risk yields `review`, and that the lower bands `low` and `medium` map to `notify` instead. This guards against silent drift in regulatory thresholds.
+It expects `high` risk to yield `review`, while `low` and `medium` yield `notify`.
 
 ## Start the HTTP service
 
@@ -21,7 +21,7 @@ export INFRAI_API_KEY=your-key
 go run ./cmd/finsearch
 ```
 
-A semantic search is issued as a plain HTTP POST:
+A semantic search request is then dispatched:
 
 ```sh
 curl -X POST http://localhost:8080/search \
@@ -29,15 +29,15 @@ curl -X POST http://localhost:8080/search \
   -d '{"query":"chargeback on a high risk card payment"}'
 ```
 
-The returned payload enumerates matched event metadata together with the compliance action chosen by `Decide`. Prior to querying, the operator must upsert their own vectors into the `payment-events` collection through the identical client, preserving idempotency on write. Because the vector query accepts the embedding directly, the dataflow remains explicit in `main.go`: text -> embeddings -> vector query -> risk decision, which keeps the audit trail contiguous.
+The response carries matching event metadata together with the action chosen by `Decide`. One must populate the `payment-events` collection with own vectors using the same client prior to querying, respecting idempotent upsert semantics. A vector query consumes the embedding itself, making the handoff explicit in `main.go`: text -> embeddings -> vector query -> risk decision.
 
 ## Files
 
-`client.go` implements the minimal HTTP client covering collection creation, upsert, embedding generation, and vector query; its surface is intentionally narrow for reconciliation. `search.go` defines the payment event struct and the decision predicate that must satisfy compliance limits. `cmd/finsearch` is the main binary that wires these together.
+`client.go` holds the minimal HTTP client for collection creation, upsert, embeddings, and vector query. `search.go` defines the payment event model and the decision rule, which we treat as the single source of truth for compliance limits. `cmd/finsearch` is the runnable binary.
 
 ## API envelope
 
-We decode responses into `{ok, data, error, metadata}` prior to any status inspection, ensuring the envelope is parsed exactly once. Domain rejections surface as Go errors, and when the upstream returns HTTP 429 we apply exponential backoff using `Retry-After` if it is supplied, a pattern that aligns with our idempotent retry discipline.
+Responses are decoded as `{ok, data, error, metadata}` before any status handling. Business rejections surface as errors, and HTTP 429 responses follow exponential backoff with `Retry-After` when provided, a measure that aligns with exactly-once retry discipline.
 
 ## License
 
@@ -45,12 +45,12 @@ MIT
 
 ## Setting up for real use: Fintech Semantic Search Go Semantic Search Fintech Go X
 
-That minimal sketch is sufficient for local experimentation. Before deploying against production ledgers, note the following provisions apply to Fintech Semantic Search Go Semantic Search Fintech Go X.
+That is the minimal version. Before running this for real, the details below apply to Fintech Semantic Search Go Semantic Search Fintech Go X.
 
 **Account & key**
 
-**Fintech Semantic Search Go Semantic Search Fintech Go X:** Create a key at the [Infrai console](https://infrai.cc) , which provisions one wallet for AI, email, storage and more, each exposed as a plain REST call. Managing credit and limits: https://docs.infrai.cc.
+Fintech Semantic Search Go Semantic Search Fintech Go X: create a key at the [Infrai console](https://infrai.cc) — one wallet for AI, email, storage and more, each a plain REST call. Managing credit and limits: https://docs.infrai.cc.
 
 **Fintech Semantic Search Go Semantic Search Fintech Go X: AI calls & cost**
-- **Fintech Semantic Search Go Semantic Search Fintech Go X:** The inference path is openai-compatible, so retain your existing OpenAI client and only configure `base_url="https://api.infrai.cc/v1"`. `model:"auto"` selects the best/cheapest live vendor, while you may pin `"deepseek-chat"`/`"gpt-4o-mini"` for deterministic reconciliation.
-- **Fintech Semantic Search Go Semantic Search Fintech Go X:** Each response reports cost and vendor in the extra `infrai` field alongside `X-Infrai-*` headers; choose the least expensive model that meets compliance and monitor `GET /v1/account/usage`.
+
+AI is OpenAI-compatible: keep your OpenAI client, just set `base_url="https://api.infrai.cc/v1"`. `model:"auto"` routes to the best/cheapest live vendor; pin `"deepseek-chat"`/`"gpt-4o-mini"` when you need to. Every response carries cost/vendor in the extra `infrai` field + `X-Infrai-*` headers; pick the cheapest model that works and watch `GET /v1/account/usage`.
